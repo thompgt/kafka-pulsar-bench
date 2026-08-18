@@ -134,6 +134,28 @@ Development happens on Windows. Both matter:
   everything and add noise to results.
 - Do not `set -u` before sourcing container or engine setup scripts; several
   reference unbound variables.
+- **`export MSYS_NO_PATHCONV=1` before any `docker exec` with an absolute
+  container path.** Git Bash rewrites `/opt/kafka/bin/...` into
+  `C:/Program Files/Git/opt/kafka/bin/...` and the exec fails with a
+  bewildering "no such file or directory".
+- `make` is not installed in Git Bash. Every target is a thin wrapper over a
+  script in `scripts/`, so `bash scripts/up.sh kafka` always works.
+- Stop unrelated containers before a publishable run. `preflight.sh` warns when
+  it finds them; `STRICT=1` promotes that to an error.
+
+## Measured on this machine (M1, 2026-08-18)
+
+Docker VM: 15 GB, 12 CPUs.
+
+| Profile | Resident memory | Note |
+|---|---|---|
+| core (MinIO + Iceberg REST) | ~0.33 GB | always up |
+| core + Kafka | ~0.78 GB | |
+| core + Pulsar | ~1.75 GB | standalone runs ZK, bookie and broker in one JVM |
+
+Cold start including image pull: ~3m20s for the Pulsar profile, the slower of
+the two. Both are well inside the 8 GB exit criterion, which leaves room for
+Flink or Spark alongside a broker.
 
 ## Where to look first
 

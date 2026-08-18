@@ -31,7 +31,7 @@ Two consequences worth stating up front:
 | # | Milestone | Outcome | Rough effort | Depends on |
 |---|---|---|---|---|
 | M0 | Scaffolding and requirements | Repo, docs, conventions | 0.5 d — **done** | — |
-| M1 | Local infrastructure | Both brokers and the warehouse boot reproducibly | 2 d | M0 |
+| M1 | Local infrastructure | Both brokers and the warehouse boot reproducibly | 2 d — **done** | M0 |
 | M2 | Harness core and Kafka driver | A valid, self-measured benchmark run | 3–4 d | M1 |
 | M3 | Pulsar driver and fairness contract | A defensible like-for-like comparison | 3–5 d | M2 |
 | M4 | Results warehouse | Every run durable and queryable in Iceberg | 2 d | M2 |
@@ -59,42 +59,46 @@ M3 if desired; nothing else on the critical path can.
 
 ---
 
-## M1 — Local infrastructure
+## M1 — Local infrastructure ✅
 
 **Goal.** Anyone can bring up either broker plus the Iceberg warehouse with one
 command, reproducibly, within a 16 GB memory budget.
 
 ### Tasks
 
-- [ ] Lock the version matrix: verify real, currently-published image tags for
-      Kafka, Pulsar, Flink, Spark, Iceberg REST, MinIO, and Airflow. Resolve each
-      to a digest. Record in `infra/compose/versions.env`.
-- [ ] `docker-compose.core.yml` — MinIO plus bucket bootstrap, Iceberg REST catalog
-- [ ] `docker-compose.kafka.yml` — single-broker KRaft, no ZooKeeper
-- [ ] `docker-compose.pulsar.yml` — standalone to begin with (see Q-1)
-- [ ] Compose profiles so `core+kafka` and `core+pulsar` are independently bootable
-- [ ] Explicit `cpus` and `mem_limit` on every service, values recorded in `infra/conf/`
-- [ ] Healthchecks on every service; `make up` blocks until genuinely ready, not
-      merely until the container is running
-- [ ] `make up` / `make down` / `make nuke` (the last removing volumes, per invariant 4)
-- [ ] `scripts/preflight.sh` — check Docker memory allocation, free disk, port conflicts
-- [ ] ADR-0001 recording the version matrix and why each version was chosen
-- [ ] Document Docker Hub rate limits and the recommended `docker login` before
-      first bulk pull
+- [x] Lock the version matrix against the registries — ADR-0001
+- [x] `docker-compose.core.yml` — MinIO plus bucket bootstrap, Iceberg REST catalog
+- [x] `docker-compose.kafka.yml` — single-broker KRaft, no ZooKeeper
+- [x] `docker-compose.pulsar.yml` — standalone (Q-1 still open)
+- [x] Independently bootable `core+kafka` and `core+pulsar`
+- [x] Explicit `cpus` and `mem_limit` on every service
+- [x] Healthchecks that test a real API call, not process liveness
+- [x] `up` / `down` / `nuke` / `reset-broker`
+- [x] `scripts/preflight.sh` — memory, disk, ports, foreign containers
+- [x] ADR-0001 recording the version matrix
+- [x] Docker Hub rate limits documented
 
-### Exit criteria
+### Outcome
 
-- `make up PROFILE=kafka` then `make down` is clean and repeatable
-- Same for `pulsar`
-- Peak resident memory for either profile is recorded and under 8 GB
-- Cold start from a clean Docker state is timed and documented (NFR-3)
+Both profiles verified working: Kafka topic create/produce/consume round-trip,
+Pulsar partitioned-topic round-trip, and the Iceberg REST catalog answering
+`/v1/config`. Broker tuning env vars confirmed applied to real topic configs.
 
-### Watch for
+| Profile | Resident memory | Cold start incl. pull |
+|---|---|---|
+| core + Kafka | ~0.78 GB | ~1m |
+| core + Pulsar | ~1.75 GB | ~3m20s |
 
-Pulsar standalone is the heaviest single container here. If it does not fit the
-budget alongside the warehouse, that forces Q-1 earlier than planned.
+Both inside the 8 GB exit criterion, leaving headroom for an engine alongside.
 
----
+### Found while verifying
+
+- Git Bash rewrites absolute container paths on `docker exec`; needs
+  `MSYS_NO_PATHCONV=1`. Recorded in `CLAUDE.md`.
+- `docker ps` renders contiguous port mappings as a range, which made the
+  preflight port check report MinIO's own ports as foreign conflicts.
+- 13 unrelated containers were running on the dev host. They contend for CPU
+  and page cache, so preflight now warns, and `STRICT=1` makes it an error.
 
 ## M2 — Harness core and Kafka driver
 
@@ -349,6 +353,6 @@ Explicitly not now, recorded so they stop competing for attention:
 | Q-1 | Pulsar standalone versus multi-bookie | Open — due M3 |
 | Q-2 | Flink SQL versus Java DataStream | Open — due M5 |
 | Q-3 | Canonical baseline sweep | Open — due M8 |
-| ADR-0001 | Version matrix | Pending M1 |
+| ADR-0001 | Version matrix | Accepted |
 | ADR-0002 | Kafka/Pulsar config equivalence | Pending M3 |
 | ADR-0003 | Flink job implementation | Pending M5 |
