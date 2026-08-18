@@ -1,0 +1,93 @@
+# Core services: object storage and the Iceberg catalog.
+#
+# Always up. Both broker profiles compose on top of this, and the results
+# warehouse must outlive individual benchmark runs — brokers get destroyed
+# between runs (invariant 4), the warehouse does not.
+
+name: kpbench
+
+networks:
+  kpbench:
+    name: kpbench
+
+volumes:
+  minio_data:
+    name: kpbench_minio_data
+
+services:
+  minio:
+    image: ${MINIO_IMAGE}:${MINIO_VERSION}
+    container_name: kpbench-minio
+    hostname: minio
+    networks: [kpbench]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Quieter logs; the benchmark output is what matters here.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    # Resource limits are mandatory on every service: an unbounded container
+    # makes results non-comparable between runs.
+    cpus: ${MINIO_CPUS:-1.0}
+    mem_limit: ${MINIO_MEM:-1g}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # One-shot bootstrap. Creates the warehouse bucket, then exits 0.
+  # Everything downstream waits on service_completed_successfully.
+  minio-init:
+    image: ${MC_IMAGE}:${MC_VERSION}
+    container_name: kpbench-minio-init
+    networks: [kpbench]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+        mc mb --ignore-existing local/$$WAREHOUSE_BUCKET &&
+        echo 'warehouse bucket ready'
+      "
+
+  iceberg-rest:
+    image: ${ICEBERG_REST_IMAGE}:${ICEBERG_REST_VERSION}
+    container_name: kpbench-iceberg-rest
+    hostname: iceberg-rest
+    networks: [kpbench]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CATALOG_WAREHOUSE: s3://${WAREHOUSE_BUCKET:-warehouse}/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      # MinIO serves path-style, not the virtual-host style AWS defaults to.
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    ports:
+      - "${ICEBERG_REST_PORT:-8181}:8181"
+    cpus: ${ICEBERG_REST_CPUS:-1.0}
+    mem_limit: ${ICEBERG_REST_MEM:-1g}
+    healthcheck:
+      # The catalog is only genuinely ready once it answers a real API call,
+      # not merely once the process is listening.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8181/v1/config?warehouse=s3://${WAREHOUSE_BUCKET:-warehouse}/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s

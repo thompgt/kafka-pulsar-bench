@@ -1,0 +1,59 @@
+# Pulsar under test: standalone mode.
+#
+# Standalone runs ZooKeeper, a bookie, and a broker inside one JVM. That is a
+# meaningful difference from the Kafka side and it is recorded, not hidden:
+# see Q-1 in the BRD, due for resolution at M3. If the memory budget allows,
+# a multi-bookie deployment is the fairer durability comparison.
+#
+# Destroyed and recreated between runs, volume included (invariant 4).
+
+name: kpbench
+
+networks:
+  kpbench:
+    name: kpbench
+
+volumes:
+  pulsar_data:
+    name: kpbench_pulsar_data
+
+services:
+  pulsar:
+    image: ${PULSAR_IMAGE}:${PULSAR_VERSION}
+    container_name: kpbench-pulsar
+    hostname: pulsar
+    networks: [kpbench]
+    ports:
+      - "${PULSAR_BROKER_PORT:-6650}:6650"
+      - "${PULSAR_ADMIN_PORT:-8080}:8080"
+    environment:
+      # Heap plus direct memory. Pulsar leans on direct buffers far more than
+      # Kafka does, so the split matters and is stated explicitly rather than
+      # left to the image default.
+      PULSAR_MEM: ${PULSAR_MEM_OPTS:--Xms1g -Xmx1g -XX:MaxDirectMemorySize=1g}
+      # --- Benchmark-relevant tuning ------------------------------------
+      # Counterparts to the Kafka settings; see the M-7 equivalence table.
+      PULSAR_PREFIX_brokerDeleteInactiveTopicsEnabled: "false"
+      PULSAR_PREFIX_defaultRetentionTimeInMinutes: ${PULSAR_RETENTION_MINUTES:-60}
+      PULSAR_PREFIX_defaultRetentionSizeInMB: ${PULSAR_RETENTION_MB:-0}
+      # Topic auto-creation off for the same reason as Kafka: the harness
+      # creates topics with an explicit partition count, and silent creation
+      # of a non-partitioned topic would invalidate partition-scaling runs.
+      PULSAR_PREFIX_allowAutoTopicCreation: "false"
+    command: >
+      /bin/bash -c "
+        bin/apply-config-from-env.py conf/standalone.conf &&
+        exec bin/pulsar standalone --no-functions-worker --no-stream-storage
+      "
+    volumes:
+      - pulsar_data:/pulsar/data
+    cpus: ${PULSAR_CPUS:-2.0}
+    mem_limit: ${PULSAR_MEM_LIMIT:-3g}
+    healthcheck:
+      # The admin healthcheck is the real readiness signal. Pulsar standalone
+      # accepts connections well before the broker can serve topics.
+      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 30
+      start_period: 30s
