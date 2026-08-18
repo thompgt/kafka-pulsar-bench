@@ -1,0 +1,22 @@
+# Normalise to LF in the repo. Scripts and configs from this repo are executed
+# inside Linux containers, where a CRLF shebang line fails with a confusing
+# "bad interpreter" error. Never let Windows checkouts introduce CRLF.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+*.properties text eol=lf
+Dockerfile* text eol=lf
+Makefile    text eol=lf
+mvnw        text eol=lf
+
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+*.jar       binary
+*.parquet   binary
+*.hdr       binary
