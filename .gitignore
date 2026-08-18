@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Java / Maven
+target/
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Benchmark output — raw run artifacts are large and machine-specific.
+# Curated, published results live in docs/results/ instead.
+results/**
+!results/.gitkeep
+!results/README.md
+
+# Local infra state
+infra/compose/.env
+.env
+volumes/
+logs/
+
+# Airflow
+airflow/logs/
+airflow/airflow.db
+airflow/standalone_admin_password.txt
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
