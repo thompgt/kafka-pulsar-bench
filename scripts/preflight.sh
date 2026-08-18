@@ -78,11 +78,19 @@ port_in_use() {
   fi
 }
 
+# Host ports published by our own containers. Built with `docker port` rather
+# than by parsing `docker ps`, because ps renders contiguous mappings as a
+# range ("9000-9001->9000-9001") that a per-port match silently misses.
+OWN_PORTS=""
+for name in $(docker ps --format '{{.Names}}' 2>/dev/null | grep '^kpbench-' || true); do
+  OWN_PORTS+="$(docker port "${name}" 2>/dev/null | sed 's/.*:\([0-9]\+\)$/\1/') "
+done
+
 check_port() {
   local port="$1" what="$2"
   if port_in_use "${port}"; then
     # Our own containers holding the port is fine; anything else is not.
-    if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; then
+    if grep -qw "${port}" <<< "${OWN_PORTS}"; then
       ok "port ${port} (${what}) held by a kpbench container"
     else
       err "port ${port} (${what}) already in use by something else"
@@ -98,6 +106,23 @@ check_port "${ICEBERG_REST_PORT:-8181}"   "iceberg rest"
 check_port "${KAFKA_EXTERNAL_PORT:-29092}" "kafka"
 check_port "${PULSAR_BROKER_PORT:-6650}"  "pulsar broker"
 check_port "${PULSAR_ADMIN_PORT:-8080}"   "pulsar admin"
+
+# --- Foreign containers --------------------------------------------------
+# Anything else running on this Docker host competes for CPU and page cache
+# with the broker under test. It does not cause a failure, it causes quietly
+# worse and less repeatable numbers, which is the harder problem.
+FOREIGN="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -cv '^kpbench-' || true)"
+if [[ "${FOREIGN}" -gt 0 ]]; then
+  if [[ "${STRICT:-0}" == "1" ]]; then
+    err "${FOREIGN} unrelated container(s) running; STRICT=1 requires an idle host"
+    docker ps --format '    {{.Names}}' | grep -v '^    kpbench-' >&2 || true
+  else
+    warn "${FOREIGN} unrelated container(s) running; they contend for CPU and page cache"
+    warn "stop them before a publishable run, or set STRICT=1 to make this an error"
+  fi
+else
+  ok "no unrelated containers running"
+fi
 
 # --- Platform -----------------------------------------------------------
 # Bind-mount performance across the Windows filesystem boundary is bad enough
