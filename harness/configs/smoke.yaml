@@ -1,0 +1,37 @@
+# Small, fast run used during development. Not a benchmark: the rate is far
+# below anything interesting, so it proves the pipeline works, not how fast
+# anything is.
+name: smoke
+driver: kafka
+description: Development smoke test — verifies the measurement path end to end.
+
+workload:
+  message_bytes: 512
+  target_rate_hz: 2000
+  duration_s: 10
+  warmup_s: 3
+  key_cardinality: 0
+  payload_fill: random
+
+topic:
+  name: kpbench-smoke
+  partitions: 3
+  delete_after_run: true
+
+producer:
+  durability: leader
+  compression: none
+  linger_ms: 0
+  batch_max_bytes: 16384
+
+consumer:
+  fetch_max_wait_ms: 10
+
+validity:
+  min_achieved_rate_ratio: 0.98
+  max_missing_ratio: 0.0
+  max_duplicate_ratio: 0.0
+  drain_timeout_s: 30
+
+driver_options:
+  bootstrap.servers: localhost:29092

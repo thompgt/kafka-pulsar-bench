@@ -1,0 +1,30 @@
+# Measures the harness against itself, with no broker involved (NFR-5).
+#
+# The numbers this produces are the floor below which nothing can be resolved.
+# Any broker result within a small multiple of this floor is describing the
+# harness, not the broker, and must be reported as such.
+name: loopback-floor
+driver: loopback
+description: Harness overhead floor — scheduling, encoding, queue handoff, recording.
+
+workload:
+  message_bytes: 512
+  target_rate_hz: 20000
+  duration_s: 20
+  warmup_s: 5
+  key_cardinality: 0
+  payload_fill: random
+
+topic:
+  name: loopback
+  partitions: 1
+  delete_after_run: false
+
+producer:
+  durability: none
+  compression: none
+
+validity:
+  min_achieved_rate_ratio: 0.98
+  max_missing_ratio: 0.0
+  drain_timeout_s: 30
