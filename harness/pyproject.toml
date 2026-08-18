@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kpbench"
+version = "0.1.0"
+description = "Measurement harness for the Kafka/Pulsar benchmark"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Config validation. Run configs are the provenance record for every
+    # published number, so they are validated rather than trusted.
+    "pydantic>=2.7,<3",
+    "PyYAML>=6.0,<7",
+    # Correct percentiles require a real histogram implementation. Invariant 2
+    # exists because averaging percentiles is the usual alternative.
+    "hdrhistogram>=0.10.3,<0.11",
+    # Native client: releases the GIL during send, which is what makes a
+    # Python harness viable at benchmark rates.
+    "confluent-kafka>=2.5,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+]
+
+[project.scripts]
+kpbench = "kpbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+# Neither ships type stubs.
+module = ["hdrh.*", "confluent_kafka.*", "pulsar.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
