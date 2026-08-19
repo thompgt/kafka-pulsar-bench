@@ -110,15 +110,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
     results_dir = pathlib.Path(args.results_dir)
     env = fingerprint.collect() if not args.no_fingerprint else {}
 
-    failures = 0
-    for i in range(args.repeat):
-        if args.repeat > 1:
-            print(f"\n=== repeat {i + 1}/{args.repeat} ===")
+    # Discard runs come first. A broker's warm-up spans runs, not just the
+    # warm-up window inside one (ADR-0004), so measuring immediately after a
+    # broker reset samples the cold end of that curve.
+    warmup_runs = args.warmup_runs
+    total_runs = warmup_runs + args.repeat
 
-        # A fresh topic name per repeat. Reusing one would let a slow drain
-        # from the previous run leak into the next one's measurements.
+    failures = 0
+    for i in range(total_runs):
+        is_warmup = i < warmup_runs
+        if total_runs > 1:
+            label = (
+                f"warm-up {i + 1}/{warmup_runs}"
+                if is_warmup
+                else f"repeat {i - warmup_runs + 1}/{args.repeat}"
+            )
+            print(f"\n=== {label} ===")
+
+        # A fresh topic name per run. Reusing one would let a slow drain from
+        # the previous run leak into the next one's measurements.
         run_config = config
-        if args.repeat > 1:
+        if total_runs > 1:
             run_config = config.model_copy(
                 update={"topic": config.topic.model_copy(update={"name": f"{config.topic.name}-{i}"})}
             )
@@ -132,10 +144,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
         _print_summary(outcome, run_config)
         doc = manifest_mod.build(outcome, run_config, env, driver.client_info())
+        # Retained rather than deleted: they are evidence the procedure was
+        # followed, and a discard run that beats the measured run that follows
+        # it is a signal something is wrong.
+        doc["warmup_run"] = is_warmup
         path = manifest_mod.write(doc, results_dir)
-        print(f"  manifest   {path}")
+        print(f"  manifest   {path}{' (warm-up, excluded)' if is_warmup else ''}")
 
-        if not outcome.valid:
+        if not outcome.valid and not is_warmup:
             failures += 1
 
     if failures:
@@ -173,6 +189,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--partitions", type=int, help="override topic partitions")
     run.add_argument("--bootstrap", help="override bootstrap.servers / service URL")
     run.add_argument("--repeat", type=int, default=1, help="run N times (variance checking)")
+    run.add_argument(
+        "--warmup-runs",
+        type=int,
+        default=0,
+        help="discard runs before measuring; 3 recommended after a broker reset (ADR-0004)",
+    )
     run.add_argument("--results-dir", default="results", help="where to write manifests")
     run.add_argument(
         "--no-fingerprint",

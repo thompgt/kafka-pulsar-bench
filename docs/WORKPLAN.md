@@ -32,7 +32,7 @@ Two consequences worth stating up front:
 |---|---|---|---|---|
 | M0 | Scaffolding and requirements | Repo, docs, conventions | 0.5 d — **done** | — |
 | M1 | Local infrastructure | Both brokers and the warehouse boot reproducibly | 2 d — **done** | M0 |
-| M2 | Harness core and Kafka driver | A valid, self-measured benchmark run | 3–4 d | M1 |
+| M2 | Harness core and Kafka driver | A valid, self-measured benchmark run | 3–4 d — **done** | M1 |
 | M3 | Pulsar driver and fairness contract | A defensible like-for-like comparison | 3–5 d | M2 |
 | M4 | Results warehouse | Every run durable and queryable in Iceberg | 2 d | M2 |
 | M5 | Flink pipeline | Both brokers to Iceberg, pipeline metrics captured | 3 d | M1, M4 |
@@ -100,64 +100,65 @@ Both inside the 8 GB exit criterion, leaving headroom for an engine alongside.
 - 13 unrelated containers were running on the dev host. They contend for CPU
   and page cache, so preflight now warns, and `STRICT=1` makes it an error.
 
-## M2 — Harness core and Kafka driver
+## M2 — Harness core and Kafka driver ✅
 
 **Goal.** A single command produces one valid, trustworthy benchmark run against
 Kafka. This milestone is the heart of the project.
 
-### Tasks
+### Delivered
 
-**Configuration and structure**
-- [ ] `harness/pyproject.toml`, Python 3.12, ruff + mypy strict + pytest
-- [ ] Config schema (pydantic): message size, target rate, duration, warm-up,
-      partitions, durability, batching, compression, key cardinality, producer
-      and consumer counts
-- [ ] `configs/smoke.yaml` — a small, fast run used for development
+- [x] `harness/` package, Python 3.12, ruff + mypy config, pytest
+- [x] Pydantic run config; `configs/smoke.yaml`, `configs/loopback-floor.yaml`
+- [x] Open-loop rate scheduler, unit-tested against a deliberately stalled sink
+- [x] Payload codec with embedded sequence and timing header
+- [x] HdrHistogram capture and merge; sample capture kept out of the hot path
+- [x] Gap, duplicate and reordering detection
+- [x] Warm-up discard, recorded in the manifest
+- [x] Validity gate: rate starvation, loss, duplication, buffer overflow, platform
+- [x] `drivers/base.py`, `kafka_driver.py`, `loopback.py`
+- [x] Loopback floor measured and documented — ADR-0002
+- [x] Environment fingerprint with live container digests
+- [x] Run manifest, `kpbench run` / `kpbench show`
+- [x] `--warmup-runs` implementing the ADR-0004 procedure
+- [x] 32 unit tests passing
 
-**Measurement core (invariants 1 and 2 live here)**
-- [ ] Open-loop rate scheduler: emits intended-send timestamps from the target
-      rate, independent of send completion. **Unit-tested against a deliberately
-      stalled sink** to prove that a stall widens the measured distribution
-      rather than vanishing from it.
-- [ ] Payload generator with embedded sequence number and monotonic send timestamp
-- [ ] HdrHistogram capture, plus merge across producer and consumer threads
-- [ ] Consumer-side validation: gap, duplicate, and reordering detection (FR-4)
-- [ ] Warm-up sample discard, with the discarded window recorded (M-5)
-- [ ] Validity gate: mark the run invalid if achieved rate falls short of target
-      by more than a configured tolerance (M-8)
+### Exit criteria — met
 
-**Driver abstraction**
-- [ ] `drivers/base.py` — the interface both transports implement. Keep it narrow;
-      everything not transport-specific stays in shared code (invariant 3).
-- [ ] `drivers/kafka_driver.py` using `confluent-kafka`
-- [ ] Topic lifecycle: create with the configured partition count before the run,
-      delete after
+- Smoke run against Kafka completes with a valid manifest ✅
+- Loopback floor measured and documented ✅ (ADR-0002)
+- Rate-scheduler and histogram-merge tests pass ✅
+- Ten repeat runs agree within a documented band ✅ (ADR-0004)
 
-**Self-measurement (NFR-5)**
-- [ ] A null/loopback driver that skips the broker entirely, establishing the
-      harness's own latency floor and maximum sustainable rate
-- [ ] Document that floor. Any benchmark result within a small multiple of it is
-      measuring the harness, not the broker, and must be reported as such.
+### Four defects found, all of which produced plausible numbers rather than errors
 
-**Output**
-- [ ] Environment fingerprint: CPU model and count, RAM, kernel, Docker version,
-      resolved image digests (M-3)
-- [ ] Run manifest written to `results/<run_id>/` as JSON plus raw histogram
-- [ ] `make bench CONFIG=...`
+This is the milestone's real output. Each of these would have survived into
+published results if the harness had not been measured against itself first.
 
-### Exit criteria
+| # | Defect | Symptom | Found by |
+|---|---|---|---|
+| 1 | Spin window exceeded the send interval, so the producer busy-spun and held the GIL | 9.4 ms p50 on an in-process loopback | loopback floor |
+| 2 | Three pure-Python histogram writes per message in the consumer | 255 ms p99 at 20k/s, from the harness's own backlog | loopback rate sweep |
+| 3 | `consume()` blocks its full timeout unless the batch fills, pinning consumer capacity at the production rate | 2.65 s p50 against Kafka | comparison against a 5.5 ms raw RTT |
+| 4 | Windows quantises poll waits to the ~15.6 ms scheduler tick | 83 ms p50 vs 26 ms for identical code under WSL2 | isolating `consume()` on an idle topic |
 
-- A smoke run against Kafka completes and emits a manifest with a valid flag
-- The loopback floor is measured and documented in the README
-- Rate-scheduler and histogram-merge unit tests pass
-- Ten repeat runs of `smoke.yaml` agree within a variance band, and that band is
-  written down (NFR-6)
+### Outcome
 
-### Watch for
+| | Linux (WSL2) | Windows host |
+|---|---|---|
+| Supported rate | ≤ 60k/s | rejected |
+| Usable rate | ≤ 100k/s | — |
+| Floor p50 | ~200 us | ~450 us |
+| Floor p99 | 1.3–6 ms | 2.6–222 ms |
 
-If the loopback floor turns out to be close to expected broker latencies, stop
-and reconsider the harness language for the measurement path before building
-anything on top of it. Discovering this at M8 would be expensive.
+Kafka smoke at 2,000/s: p50 ~15 ms, p99 ~65 ms on a warm broker, on a contended
+host. Variance band 1.3x on p99, 1.7x on p50.
+
+### Carried forward
+
+- Re-measure floor and band on an idle host (`STRICT=1`) before publication
+- The p99 floor is still the same order as Kafka's p99; absolute tail figures
+  are not comparable with vendor numbers, and every result must say so
+- Separate producer/consumer processes now look unnecessary at a 100k/s ceiling
 
 ---
 
@@ -187,7 +188,7 @@ consume more time than planned, and the one most worth doing slowly.
       client libraries do not impose materially different harness overheads
 - [ ] Symmetry audit: diff the two drivers and confirm nothing fairness-relevant
       exists in one and not the other
-- [ ] ADR-0002 recording the equivalence decisions
+- [ ] ADR-0005 recording the equivalence decisions
 - [ ] Resolve Q-1 (standalone versus multi-bookie) and record the reasoning
 
 ### Exit criteria
@@ -251,7 +252,7 @@ for pipeline characteristics, which are a different question.
 - [ ] Capture checkpoint duration and size, backpressure, sustained sink
       throughput, and restart count into `bench.pipeline_metrics` (FR-12)
 - [ ] Document the small-files behaviour observed, which motivates M7 maintenance
-- [ ] ADR-0003 on the SQL-versus-Java decision
+- [ ] ADR-0006 on the SQL-versus-Java decision
 
 ### Exit criteria
 
@@ -354,5 +355,8 @@ Explicitly not now, recorded so they stop competing for attention:
 | Q-2 | Flink SQL versus Java DataStream | Open — due M5 |
 | Q-3 | Canonical baseline sweep | Open — due M8 |
 | ADR-0001 | Version matrix | Accepted |
-| ADR-0002 | Kafka/Pulsar config equivalence | Pending M3 |
-| ADR-0003 | Flink job implementation | Pending M5 |
+| ADR-0002 | Harness operating envelope | Accepted (revised) |
+| ADR-0003 | Benchmarks run under Linux | Accepted |
+| ADR-0004 | Variance band and broker warm-up | Accepted |
+| ADR-0005 | Kafka/Pulsar config equivalence | Pending M3 |
+| ADR-0006 | Flink job implementation | Pending M5 |
