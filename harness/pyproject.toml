@@ -21,6 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pulsar = [
+    # Optional: only needed to run the Pulsar driver. No Windows wheels are
+    # published, which is moot since benchmarks must run on Linux (ADR-0003).
+    "pulsar-client>=3.5,<4",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

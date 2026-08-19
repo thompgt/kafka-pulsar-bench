@@ -40,6 +40,12 @@ services:
       # creates topics with an explicit partition count, and silent creation
       # of a non-partitioned topic would invalidate partition-scaling runs.
       PULSAR_PREFIX_allowAutoTopicCreation: "false"
+      # Whether every write is fsynced to the BookKeeper journal before ack.
+      # Pulsar's default is true; Kafka's default is to rely on the page cache
+      # and never fsync explicitly. That is the single largest fairness
+      # question in this comparison, so it is exposed as a variable rather
+      # than left implicit. See the equivalence table.
+      PULSAR_PREFIX_journalSyncData: "${PULSAR_JOURNAL_SYNC:-true}"
     command: >
       /bin/bash -c "
         bin/apply-config-from-env.py conf/standalone.conf &&

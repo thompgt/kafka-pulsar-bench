@@ -1,0 +1,40 @@
+# Pulsar counterpart of smoke.yaml. Every workload and validity value is
+# identical by construction; only the driver and connection details differ.
+# If these two files ever drift apart, the comparison they feed is void.
+name: smoke-pulsar
+driver: pulsar
+description: Development smoke test against Pulsar — mirrors configs/smoke.yaml.
+
+workload:
+  message_bytes: 512
+  target_rate_hz: 2000
+  duration_s: 10
+  warmup_s: 3
+  key_cardinality: 0
+  payload_fill: random
+
+topic:
+  name: kpbench-smoke
+  partitions: 3
+  delete_after_run: true
+
+producer:
+  durability: leader
+  compression: none
+  linger_ms: 0
+  batch_max_bytes: 16384
+
+consumer:
+  fetch_max_wait_ms: 10
+  poll_timeout_ms: 5
+  max_poll_records: 2000
+
+validity:
+  min_achieved_rate_ratio: 0.98
+  max_missing_ratio: 0.0
+  max_duplicate_ratio: 0.0
+  drain_timeout_s: 30
+
+driver_options:
+  service.url: pulsar://localhost:6650
+  admin.url: http://localhost:8080
