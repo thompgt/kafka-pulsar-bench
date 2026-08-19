@@ -179,7 +179,9 @@ class KafkaDriver(Driver):
     def poll(self, timeout_s: float) -> list[bytes]:
         if self._consumer is None:
             raise DriverError("consumer not started")
-        msgs = self._consumer.consume(num_messages=5000, timeout=timeout_s)
+        msgs = self._consumer.consume(
+            num_messages=self.config.consumer.max_poll_records, timeout=timeout_s
+        )
         out: list[bytes] = []
         for m in msgs:
             err = m.error()

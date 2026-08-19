@@ -92,6 +92,20 @@ class ConsumerConfig(Base):
     """Low by default: a large fetch wait adds latency that is the consumer's
     doing, not the broker's, and would be misread as broker latency."""
 
+    poll_timeout_ms: int = Field(default=5, ge=1, le=1_000)
+    """How long a poll waits when nothing has arrived yet.
+
+    Kept small deliberately. A batching consume call blocks for the whole
+    timeout unless its batch fills, so a large value caps consumer throughput
+    at roughly (batch / timeout) and adds up to the timeout to every message's
+    measured latency. A 100ms value here once put 2.6s of harness queueing
+    into results that looked like broker latency."""
+
+    max_poll_records: int = Field(default=2_000, ge=1, le=100_000)
+    """Batch ceiling per poll. Must be big enough that the consumer can burst
+    ahead of the producer and drain a backlog, or any deficit it ever incurs
+    becomes permanent."""
+
 
 class ValidityConfig(Base):
     """Thresholds that decide whether a run may be reported at all (M-8)."""

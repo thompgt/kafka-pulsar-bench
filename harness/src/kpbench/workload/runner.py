@@ -95,11 +95,12 @@ class BenchmarkRunner:
         add_sample = self.samples.add
         observe = self.tracker.observe
         poll = self.driver.poll
+        poll_timeout_s = self.config.consumer.poll_timeout_ms / 1000.0
         now = time.perf_counter_ns
         stopped = self._stop.is_set
         try:
             while not stopped():
-                payloads = poll(0.1)
+                payloads = poll(poll_timeout_s)
                 if not payloads:
                     continue
                 recv_ns = now()
