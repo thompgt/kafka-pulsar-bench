@@ -18,6 +18,7 @@ only to prevent a specific way of getting a plausible wrong answer:
 
 from __future__ import annotations
 
+import platform
 import sys
 import threading
 import time
@@ -198,6 +199,14 @@ class BenchmarkRunner:
         send_delay = summarise(recorder.send_delay)
 
         reasons: list[str] = []
+        # Platform first: on Windows nothing else in this list can be trusted,
+        # because the poll granularity exceeds the latencies being measured.
+        if platform.system() == "Windows" and not cfg.validity.allow_windows_host:
+            reasons.append(
+                "executed on a Windows host, where poll waits quantise to the "
+                "~15.6ms scheduler tick, larger than the latencies being "
+                "measured. Run under WSL2 or Linux (ADR-0003)."
+            )
         if achieved_ratio < cfg.validity.min_achieved_rate_ratio:
             reasons.append(
                 f"generator sustained only {achieved_rate:,.0f}/s of the "
