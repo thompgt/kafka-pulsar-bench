@@ -131,9 +131,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         # the previous run leak into the next one's measurements.
         run_config = config
         if total_runs > 1:
-            run_config = config.model_copy(
-                update={"topic": config.topic.model_copy(update={"name": f"{config.topic.name}-{i}"})}
-            )
+            topic = config.topic.model_copy(update={"name": f"{config.topic.name}-{i}"})
+            run_config = config.model_copy(update={"topic": topic})
 
         driver = build_driver(run_config)
         runner = BenchmarkRunner(run_config, driver)

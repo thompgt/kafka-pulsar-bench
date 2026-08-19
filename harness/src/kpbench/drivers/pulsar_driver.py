@@ -14,6 +14,7 @@ and `block_if_queue_full` (which would turn the open loop into a closed one).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 import urllib.error
@@ -65,11 +66,11 @@ class PulsarDriver(Driver):
     def _admin(self, method: str, path: str, body: str | None = None) -> str:
         url = f"{self._admin_url}/admin/v2/{path}"
         data = body.encode("utf-8") if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method)  # noqa: S310
+        req = urllib.request.Request(url, data=data, method=method)
         if data is not None:
             req.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 return str(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -107,10 +108,10 @@ class PulsarDriver(Driver):
     def deprovision(self) -> None:
         if not self.config.topic.delete_after_run:
             return
-        try:
+        # Teardown must never fail a run: a topic that cannot be deleted is a
+        # cleanup problem, not a reason to discard measurements already taken.
+        with contextlib.suppress(DriverError):
             self._admin("DELETE", f"{self._topic_path()}/partitions?force=true")
-        except DriverError:
-            pass  # teardown must never fail a run
 
     # --- client ----------------------------------------------------------
     def _ensure_client(self) -> pulsar.Client:
@@ -159,7 +160,7 @@ class PulsarDriver(Driver):
                 partition_key=key.decode("ascii") if key is not None else None,
             )
             self._pending += 1
-        except Exception as exc:  # noqa: BLE001 - queue-full surfaces here
+        except Exception as exc:
             raise DriverError(
                 f"pulsar send failed ({exc}); the harness cannot sustain this rate"
             ) from exc
@@ -168,10 +169,8 @@ class PulsarDriver(Driver):
         if self._producer is None:
             return 0
         deadline = time.monotonic() + timeout_s
-        try:
+        with contextlib.suppress(Exception):
             self._producer.flush()
-        except Exception:  # noqa: BLE001 - reported via the pending count
-            pass
         while self._pending > 0 and time.monotonic() < deadline:
             time.sleep(0.01)
         return max(0, self._pending)
@@ -209,7 +208,7 @@ class PulsarDriver(Driver):
             raise DriverError("consumer not started")
         try:
             msgs = self._consumer.batch_receive()
-        except Exception as exc:  # noqa: BLE001 - timeout arrives as an exception
+        except Exception as exc:
             if "Timeout" in str(exc) or "TimeOut" in str(exc):
                 return []
             raise DriverError(f"pulsar receive error: {exc}") from exc
@@ -233,10 +232,8 @@ class PulsarDriver(Driver):
     def close(self) -> None:
         for obj in (self._consumer, self._producer, self._client):
             if obj is not None:
-                try:
+                with contextlib.suppress(Exception):
                     obj.close()
-                except Exception:  # noqa: BLE001 - teardown must not mask results
-                    pass
         self._consumer = None
         self._producer = None
         self._client = None

@@ -29,7 +29,7 @@ CAPACITY_SLACK = 1.05
 class SampleBuffer:
     """Fixed-capacity store of (recv, intended, send) timestamps in ns."""
 
-    __slots__ = ("_recv", "_intended", "_send", "_capacity", "n", "overflow")
+    __slots__ = ("_capacity", "_intended", "_recv", "_send", "n", "overflow")
 
     def __init__(self, expected_samples: int) -> None:
         self._capacity = max(1024, int(expected_samples * CAPACITY_SLACK))

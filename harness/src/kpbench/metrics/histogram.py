@@ -44,7 +44,7 @@ class LatencyRecorder:
       not near zero, the harness was struggling and the run is suspect.
     """
 
-    __slots__ = ("response", "service", "send_delay", "count")
+    __slots__ = ("count", "response", "send_delay", "service")
 
     def __init__(self) -> None:
         self.response = new_histogram()

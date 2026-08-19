@@ -12,6 +12,7 @@ manifest and therefore invisible in the published result.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from typing import Any, ClassVar
 
@@ -66,7 +67,7 @@ class KafkaDriver(Driver):
         for name, fut in futures.items():
             try:
                 fut.result(timeout=30)
-            except Exception as exc:  # noqa: BLE001 - surfaced verbatim below
+            except Exception as exc:
                 if "already exists" in str(exc).lower():
                     continue
                 raise DriverError(f"could not create topic {name}: {exc}") from exc
@@ -94,7 +95,7 @@ class KafkaDriver(Driver):
             futures = self._admin_client().delete_topics([self.config.topic.name])
             for fut in futures.values():
                 fut.result(timeout=30)
-        except Exception:  # noqa: BLE001 - teardown must never fail a run
+        except Exception:
             pass
 
     # --- producer --------------------------------------------------------
@@ -197,10 +198,8 @@ class KafkaDriver(Driver):
     # --- teardown --------------------------------------------------------
     def close(self) -> None:
         if self._consumer is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._consumer.close()
-            except Exception:  # noqa: BLE001 - teardown must not mask results
-                pass
             self._consumer = None
         self._producer = None
 

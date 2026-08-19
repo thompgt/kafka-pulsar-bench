@@ -8,14 +8,14 @@ place tuning values are allowed to live.
 from __future__ import annotations
 
 import pathlib
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class Durability(str, Enum):
+class Durability(StrEnum):
     """How many acknowledgements a producer waits for.
 
     The mapping to each broker's native setting is deliberately indirect: the
@@ -32,7 +32,7 @@ class Durability(str, Enum):
     """Acknowledged by the full durability set. Kafka acks=all."""
 
 
-class Compression(str, Enum):
+class Compression(StrEnum):
     NONE = "none"
     LZ4 = "lz4"
     ZSTD = "zstd"
@@ -40,7 +40,7 @@ class Compression(str, Enum):
     GZIP = "gzip"
 
 
-class PayloadFill(str, Enum):
+class PayloadFill(StrEnum):
     """What the message body is filled with.
 
     This is not cosmetic. Zero-filled payloads compress to almost nothing, so a

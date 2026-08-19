@@ -108,7 +108,7 @@ class BenchmarkRunner:
                 for buf in payloads:
                     try:
                         magic, seq, intended_ns, send_ns = unpack(buf, 0)
-                    except Exception:  # noqa: BLE001 - short/garbage payload
+                    except Exception:
                         self._unknown_seq += 1
                         continue
                     if magic != MAGIC:
@@ -120,7 +120,7 @@ class BenchmarkRunner:
                         continue  # warm-up sample, discarded (M-5)
                     add_sample(recv_ns, intended_ns, send_ns)
                     observe(seq - warmup)
-        except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
+        except BaseException as exc:
             self._consumer_error = exc
 
     # --- main ------------------------------------------------------------

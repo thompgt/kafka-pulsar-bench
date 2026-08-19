@@ -33,7 +33,7 @@ Two consequences worth stating up front:
 | M0 | Scaffolding and requirements | Repo, docs, conventions | 0.5 d — **done** | — |
 | M1 | Local infrastructure | Both brokers and the warehouse boot reproducibly | 2 d — **done** | M0 |
 | M2 | Harness core and Kafka driver | A valid, self-measured benchmark run | 3–4 d — **done** | M1 |
-| M3 | Pulsar driver and fairness contract | A defensible like-for-like comparison | 3–5 d | M2 |
+| M3 | Pulsar driver and fairness contract | A defensible like-for-like comparison | 3–5 d — **partial** | M2 |
 | M4 | Results warehouse | Every run durable and queryable in Iceberg | 2 d | M2 |
 | M5 | Flink pipeline | Both brokers to Iceberg, pipeline metrics captured | 3 d | M1, M4 |
 | M6 | PySpark analysis | Percentiles, comparisons, regression detection | 2 d | M4 |
@@ -162,46 +162,53 @@ host. Variance band 1.3x on p99, 1.7x on p50.
 
 ---
 
-## M3 — Pulsar driver and fairness contract
+## M3 — Pulsar driver and fairness contract 🟡
 
-**Goal.** The comparison is defensible. This is the milestone most likely to
-consume more time than planned, and the one most worth doing slowly.
+**Goal.** The comparison is defensible. Substantially complete; **Q-1 blocks the
+durability half.**
 
-### Tasks
+### Delivered
 
-- [ ] `drivers/pulsar_driver.py` using the official `pulsar-client`
-- [ ] Topic/namespace lifecycle with a partition count matching the Kafka side
-- [ ] **The equivalence table.** For every workload parameter, document the Kafka
-      setting, the Pulsar setting, whether they are truly equivalent, and the
-      justification. At minimum:
-      - durability: `acks` and `min.insync.replicas` versus ensemble/write/ack quorum
-      - fsync behaviour: Kafka page-cache-and-flush policy versus BookKeeper journal
-      - partitioning: Kafka partitions versus Pulsar partitioned topics
-      - batching: `linger.ms` and `batch.size` versus Pulsar batching delay and max
-      - compression: codec availability and defaults on each side
-      - consumer model: consumer group versus subscription type
-- [ ] Flag every parameter where exact equivalence is **impossible**, and state
-      which way the residual bias runs
-- [ ] Where equivalence is genuinely ambiguous, run both settings rather than
-      picking one and defending it
+- [x] `drivers/pulsar_driver.py` on the official `pulsar-client` 3.13
+- [x] Topic lifecycle via the Pulsar REST admin API (the Python client has none)
+- [x] `configs/smoke-pulsar.yaml`, mirroring `smoke.yaml` value for value
+- [x] Equivalence table — `docs/METHODOLOGY.md` section 3
+- [x] Durability asymmetry measured, not argued — ADR-0005
+- [x] Symmetry audit of the two drivers, recorded in the table
+- [x] `journalSyncData` exposed as a Compose variable so the asymmetry is testable
+
+### The central finding
+
+Kafka `acks=1` acknowledges from the leader's page cache and never fsyncs.
+Pulsar acknowledges only after an fsync to the BookKeeper journal. Measured on
+a warm broker, same workload:
+
+| Pulsar `journalSyncData` | p50 | p99 |
+|---|---|---|
+| `true` (default) | ~113 ms | 184–450 ms |
+| `false` | ~58 ms | 118–153 ms |
+
+Roughly 2x. **A comparison of Kafka `acks=1` against stock Pulsar measures fsync
+and reports it as a broker difference.** ADR-0005 therefore runs every
+durability comparison both ways — matched-guarantee and matched-default — and
+publishes both.
+
+The first attempt at this measurement used cold brokers and pointed the other
+way. ADR-0004's warm-up procedure caught it.
+
+### Outstanding
+
+- [ ] **Q-1: multi-bookie deployment.** In standalone there is one bookie, so
+      ensemble, write and ack quorum are all 1. `Durability.LEADER` and
+      `Durability.ALL` collapse, and there is no `acks=0` analogue. **Durability
+      sweeps on the Pulsar side are not publishable until this lands.**
+- [ ] Kafka `flush.messages=1` plumbed through config, so matched-guarantee mode
+      is actually expressible
 - [ ] Loopback floor re-measured through the Pulsar client, to confirm the two
-      client libraries do not impose materially different harness overheads
-- [ ] Symmetry audit: diff the two drivers and confirm nothing fairness-relevant
-      exists in one and not the other
-- [ ] ADR-0005 recording the equivalence decisions
-- [ ] Resolve Q-1 (standalone versus multi-bookie) and record the reasoning
-
-### Exit criteria
-
-- The same config file runs against both brokers and produces comparable manifests
-- The equivalence table is complete, with no parameter left undocumented
-- Client overhead difference between the two harness paths is measured and stated
-
-### Watch for
-
-The temptation to declare equivalence where there is none, because the table
-looks cleaner. An honest "these are not equivalent, and the bias favours X" is
-worth more than a tidy table.
+      client libraries impose comparable harness overhead
+- [ ] Establish Pulsar's own warm-up curve. Its run-to-run variance is visibly
+      higher than Kafka's and does not settle after three discard runs, so the
+      uniform procedure is itself a mild asymmetry.
 
 ---
 
@@ -351,12 +358,12 @@ Explicitly not now, recorded so they stop competing for attention:
 
 | ID | Decision | Status |
 |---|---|---|
-| Q-1 | Pulsar standalone versus multi-bookie | Open — due M3 |
+| Q-1 | Pulsar standalone versus multi-bookie | **Open — now blocking durability results** |
 | Q-2 | Flink SQL versus Java DataStream | Open — due M5 |
 | Q-3 | Canonical baseline sweep | Open — due M8 |
 | ADR-0001 | Version matrix | Accepted |
 | ADR-0002 | Harness operating envelope | Accepted (revised) |
 | ADR-0003 | Benchmarks run under Linux | Accepted |
 | ADR-0004 | Variance band and broker warm-up | Accepted |
-| ADR-0005 | Kafka/Pulsar config equivalence | Pending M3 |
+| ADR-0005 | Durability run both ways | Accepted |
 | ADR-0006 | Flink job implementation | Pending M5 |

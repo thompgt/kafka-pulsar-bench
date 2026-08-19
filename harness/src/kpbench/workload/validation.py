@@ -57,7 +57,7 @@ class DeliveryTracker:
     broker.
     """
 
-    __slots__ = ("_seen", "_total", "received", "duplicates", "out_of_order", "_max_seq")
+    __slots__ = ("_max_seq", "_seen", "_total", "duplicates", "out_of_order", "received")
 
     def __init__(self, total_messages: int) -> None:
         self._seen = bytearray(total_messages)

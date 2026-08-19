@@ -25,7 +25,7 @@ def _run(cmd: list[str], timeout: float = 15.0) -> str | None:
     if exe is None:
         return None
     try:
-        out = subprocess.run(  # noqa: S603 - fixed command list, no shell
+        out = subprocess.run(
             [exe, *cmd[1:]],
             capture_output=True,
             text=True,
