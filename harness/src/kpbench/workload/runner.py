@@ -18,6 +18,7 @@ only to prevent a specific way of getting a plausible wrong answer:
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import uuid
@@ -27,10 +28,20 @@ from typing import Any
 
 from kpbench.config import RunConfig
 from kpbench.drivers.base import Driver
-from kpbench.metrics.histogram import LatencyRecorder, summarise
-from kpbench.workload.payload import PayloadCodec, key_for
+from kpbench.metrics.histogram import summarise
+from kpbench.metrics.samples import SampleBuffer
+from kpbench.workload.payload import HEADER_STRUCT, MAGIC, PayloadCodec, key_for
 from kpbench.workload.scheduler import OpenLoopSchedule
 from kpbench.workload.validation import DeliveryTracker
+
+# See the note where this is applied: the CPython default of 5ms lets the
+# consumer thread wait milliseconds for the GIL, which is then indistinguishable
+# from broker latency in the results.
+SWITCH_INTERVAL_S = 0.0002
+
+# Bound once: the consumer loop unpacks inline rather than calling a helper
+# that would allocate a result object for every message.
+_HEADER_UNPACK = HEADER_STRUCT.unpack_from
 
 
 @dataclass
@@ -59,7 +70,7 @@ class BenchmarkRunner:
             fill=w.payload_fill.value,
             seed=config.seed,
         )
-        self.recorder = LatencyRecorder()
+        self.samples = SampleBuffer(max(1, self.schedule.measured_messages))
         self.tracker = DeliveryTracker(max(1, self.schedule.measured_messages))
 
         self._stop = threading.Event()
@@ -70,27 +81,43 @@ class BenchmarkRunner:
 
     # --- consumer thread -------------------------------------------------
     def _consume_loop(self) -> None:
+        """Kept as lean as it can be made.
+
+        Everything in this loop is paid per message while measurement is
+        running, so anything that can be deferred to after the run is deferred:
+        histogram construction, throughput bucketing, and percentile
+        computation all happen later. Locals are bound up front to avoid
+        attribute lookups, and the payload header is unpacked inline rather
+        than through a helper that would allocate a result object per message.
+        """
         warmup = self.schedule.warmup_messages
+        unpack = _HEADER_UNPACK
+        add_sample = self.samples.add
+        observe = self.tracker.observe
+        poll = self.driver.poll
+        now = time.perf_counter_ns
+        stopped = self._stop.is_set
         try:
-            while not self._stop.is_set():
-                payloads = self.driver.poll(0.1)
+            while not stopped():
+                payloads = poll(0.1)
                 if not payloads:
                     continue
-                recv_ns = time.perf_counter_ns()
+                recv_ns = now()
                 for buf in payloads:
                     try:
-                        t = PayloadCodec.decode(buf)
-                    except ValueError:
+                        magic, seq, intended_ns, send_ns = unpack(buf, 0)
+                    except Exception:  # noqa: BLE001 - short/garbage payload
+                        self._unknown_seq += 1
+                        continue
+                    if magic != MAGIC:
                         # Foreign message on the topic. Counted, not fatal:
                         # silently ignoring it would hide a dirty topic.
                         self._unknown_seq += 1
                         continue
-                    if t.seq < warmup:
+                    if seq < warmup:
                         continue  # warm-up sample, discarded (M-5)
-                    self.recorder.record(recv_ns, t.intended_ns, t.send_ns)
-                    self.tracker.observe(t.seq - warmup)
-                    bucket = (recv_ns - self._measure_start_ns) // 1_000_000_000
-                    self._throughput[bucket] = self._throughput.get(bucket, 0) + 1
+                    add_sample(recv_ns, intended_ns, send_ns)
+                    observe(seq - warmup)
         except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
             self._consumer_error = exc
 
@@ -107,6 +134,14 @@ class BenchmarkRunner:
                 "setup latency as broker latency"
             )
         self.driver.start_producer()
+
+        # The producer and consumer threads contend for the GIL. At the default
+        # 5ms switch interval the consumer can wait milliseconds to be
+        # scheduled, and that wait is recorded as latency the broker never
+        # caused. Tightening it trades a little throughput for a measurement
+        # that reflects the system under test rather than CPython's scheduler.
+        previous_switch_interval = sys.getswitchinterval()
+        sys.setswitchinterval(SWITCH_INTERVAL_S)
 
         consumer_thread = threading.Thread(
             target=self._consume_loop, name="kpbench-consumer", daemon=True
@@ -143,6 +178,7 @@ class BenchmarkRunner:
 
         self._stop.set()
         consumer_thread.join(timeout=10.0)
+        sys.setswitchinterval(previous_switch_interval)
         if self._consumer_error is not None:
             raise self._consumer_error
 
@@ -152,9 +188,13 @@ class BenchmarkRunner:
         achieved_rate = sent / elapsed_s if elapsed_s > 0 else 0.0
         achieved_ratio = achieved_rate / cfg.workload.target_rate_hz
 
-        response = summarise(self.recorder.response)
-        service = summarise(self.recorder.service)
-        send_delay = summarise(self.recorder.send_delay)
+        # Histograms are built here, after measurement has finished, so their
+        # cost cannot appear in the results they describe.
+        recorder = self.samples.to_recorder()
+        self._throughput = self.samples.throughput_per_second(self._measure_start_ns)
+        response = summarise(recorder.response)
+        service = summarise(recorder.service)
+        send_delay = summarise(recorder.send_delay)
 
         reasons: list[str] = []
         if achieved_ratio < cfg.validity.min_achieved_rate_ratio:
@@ -174,6 +214,11 @@ class BenchmarkRunner:
             )
         if unsent:
             reasons.append(f"{unsent:,} messages were still unsent when flush timed out")
+        if self.samples.overflow:
+            reasons.append(
+                f"{self.samples.overflow:,} samples exceeded the capture buffer; "
+                "the reported distribution is truncated"
+            )
         if self._unknown_seq:
             reasons.append(
                 f"{self._unknown_seq:,} unrecognised messages on the topic; "

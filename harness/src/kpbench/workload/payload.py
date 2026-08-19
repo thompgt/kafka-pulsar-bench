@@ -22,6 +22,11 @@ MAGIC = b"KPB1"
 _HEADER = struct.Struct("<4sQqq")
 HEADER_SIZE = _HEADER.size  # 28
 
+# Exported so the consumer hot loop can unpack inline. Decoding through
+# `PayloadCodec.decode` allocates a Timing object per message, which is real
+# cost when it happens tens of thousands of times a second.
+HEADER_STRUCT = _HEADER
+
 
 @dataclass(frozen=True, slots=True)
 class Timing:
