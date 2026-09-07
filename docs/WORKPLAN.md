@@ -202,8 +202,11 @@ way. ADR-0004's warm-up procedure caught it.
       ensemble, write and ack quorum are all 1. `Durability.LEADER` and
       `Durability.ALL` collapse, and there is no `acks=0` analogue. **Durability
       sweeps on the Pulsar side are not publishable until this lands.**
-- [ ] Kafka `flush.messages=1` plumbed through config, so matched-guarantee mode
+- [x] Kafka `flush.messages=1` plumbed through config, so matched-guarantee mode
       is actually expressible
+- [x] Partition cumulative acknowledgement in Pulsar driver, ensuring messages from
+      all partitions are acknowledged rather than just the final partition in a batch
+- [x] Asynchronous delivery errors tracked and asserted in both Kafka and Pulsar drivers
 - [ ] Loopback floor re-measured through the Pulsar client, to confirm the two
       client libraries impose comparable harness overhead
 - [ ] Establish Pulsar's own warm-up curve. Its run-to-run variance is visibly

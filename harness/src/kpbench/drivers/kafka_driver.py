@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 
 import confluent_kafka
 from confluent_kafka import Consumer, KafkaError, Producer
-from confluent_kafka.admin import AdminClient, NewTopic
+from confluent_kafka.admin import AdminClient, NewTopic  # type: ignore[attr-defined]
 
 from kpbench.config import Compression, Durability, RunConfig
 from kpbench.drivers.base import Driver, DriverError
@@ -50,6 +50,7 @@ class KafkaDriver(Driver):
         self._group_id = config.driver_options.get(
             "group.id", f"kpbench-{config.name}-{int(time.time())}"
         )
+        self._send_errors = 0
 
     # --- topic lifecycle -------------------------------------------------
     def _admin_client(self) -> AdminClient:
@@ -58,10 +59,14 @@ class KafkaDriver(Driver):
         return self._admin
 
     def provision(self) -> None:
+        topic_config: dict[str, str] = {}
+        if self.config.topic.flush_messages is not None:
+            topic_config["flush.messages"] = str(self.config.topic.flush_messages)
         topic = NewTopic(
             self.config.topic.name,
             num_partitions=self.config.topic.partitions,
             replication_factor=1,
+            config=topic_config if topic_config else None,
         )
         futures = self._admin_client().create_topics([topic])
         for name, fut in futures.items():
@@ -119,15 +124,25 @@ class KafkaDriver(Driver):
         conf.update(
             {k: v for k, v in self.config.driver_options.items() if k.startswith("producer.")}
         )
+        self._send_errors = 0
         self._producer = Producer(
             {k.removeprefix("producer."): v for k, v in conf.items()}
         )
+
+    def _on_delivery(self, err: Any, msg: Any) -> None:
+        if err is not None:
+            self._send_errors += 1
 
     def send(self, key: bytes | None, value: bytes) -> None:
         if self._producer is None:
             raise DriverError("producer not started")
         try:
-            self._producer.produce(self.config.topic.name, value=value, key=key)
+            self._producer.produce(
+                self.config.topic.name,
+                value=value,
+                key=key,
+                on_delivery=self._on_delivery,
+            )
         except BufferError as exc:
             # Blocking to make room would be coordinated omission by the back
             # door. Fail loudly: the run is not measuring what it claims to.
@@ -142,7 +157,10 @@ class KafkaDriver(Driver):
     def flush(self, timeout_s: float) -> int:
         if self._producer is None:
             return 0
-        return int(self._producer.flush(timeout_s))
+        unsent = int(self._producer.flush(timeout_s))
+        if self._send_errors > 0:
+            raise DriverError(f"kafka delivery failed for {self._send_errors} messages")
+        return unsent
 
     # --- consumer --------------------------------------------------------
     def start_consumer(self) -> None:

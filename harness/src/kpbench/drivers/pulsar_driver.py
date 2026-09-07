@@ -122,6 +122,15 @@ class PulsarDriver(Driver):
     # --- producer --------------------------------------------------------
     def start_producer(self) -> None:
         p = self.config.producer
+        opts = self.config.driver_options
+        # Allow explicit control over batching; if linger and batch size are both 0,
+        # disable batching so Pulsar doesn't pay a forced 1ms batching delay.
+        batching_enabled = opts.get("producer.batching_enabled", "true").lower() == "true"
+        if p.linger_ms == 0 and p.batch_max_bytes == 0 and "producer.batching_enabled" not in opts:
+            batching_enabled = False
+
+        self._send_errors = 0
+        self._pending = 0
         self._producer = self._ensure_client().create_producer(
             self._topic,
             compression_type=_COMPRESSION[p.compression],
@@ -129,7 +138,7 @@ class PulsarDriver(Driver):
             # batching is left enabled to match, with the delay carried over.
             # The internal trigger conditions are not identical - see the
             # equivalence table.
-            batching_enabled=True,
+            batching_enabled=batching_enabled,
             batching_max_publish_delay_ms=max(1, int(p.linger_ms)),
             batching_max_allowed_size_in_bytes=p.batch_max_bytes,
             batching_max_messages=1_000_000,
@@ -173,6 +182,8 @@ class PulsarDriver(Driver):
             self._producer.flush()
         while self._pending > 0 and time.monotonic() < deadline:
             time.sleep(0.01)
+        if self._send_errors > 0:
+            raise DriverError(f"pulsar send failed for {self._send_errors} messages")
         return max(0, self._pending)
 
     # --- consumer --------------------------------------------------------
@@ -197,11 +208,15 @@ class PulsarDriver(Driver):
         )
 
     def wait_consumer_ready(self, timeout_s: float) -> bool:
-        # Pulsar's subscribe() is synchronous: it returns once the subscription
-        # exists on every partition, so there is no rebalance to wait for. This
-        # is a genuine asymmetry with Kafka, where assignment is asynchronous
-        # and must be awaited. Recorded in the equivalence table.
-        return self._consumer is not None
+        if self._consumer is None:
+            return False
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            is_connected = getattr(self._consumer, "is_connected", None)
+            if is_connected is None or is_connected():
+                return True
+            time.sleep(0.1)
+        return True
 
     def poll(self, timeout_s: float) -> list[bytes]:
         if self._consumer is None:
@@ -214,16 +229,17 @@ class PulsarDriver(Driver):
             raise DriverError(f"pulsar receive error: {exc}") from exc
 
         out: list[bytes] = []
-        last = None
+        last_per_partition: dict[str, Any] = {}
         for m in msgs:
             out.append(bytes(m.data()))
-            last = m
-        if last is not None:
-            # Cumulative rather than per-message: acknowledging individually
-            # would put N extra client calls in the consumer hot path, which
-            # the Kafka side does not pay. Pulsar requires acknowledgement to
-            # avoid redelivery at ack timeout, so it cannot simply be skipped;
-            # cumulative is the cheapest form. Noted as an asymmetry.
+            # Track the latest message for each partition topic
+            topic = getattr(m, "topic_name", lambda: None)() or self._topic
+            last_per_partition[topic] = m
+
+        for last in last_per_partition.values():
+            # Acknowledge cumulatively per partition: ensures all partitions
+            # received in the batch are acknowledged rather than just the last
+            # message's partition, avoiding unacked message buildup and redelivery.
             self._consumer.acknowledge_cumulative(last)
             self._last_msg = last
         return out

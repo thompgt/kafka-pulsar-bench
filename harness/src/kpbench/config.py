@@ -77,6 +77,8 @@ class TopicConfig(Base):
     name: str = Field(min_length=1, max_length=200)
     partitions: int = Field(default=1, ge=1, le=1000)
     delete_after_run: bool = True
+    flush_messages: int | None = Field(default=None, ge=1)
+    """Topic-level flush interval in messages (e.g. 1 for matched-guarantee in Kafka)."""
 
 
 class ProducerConfig(Base):

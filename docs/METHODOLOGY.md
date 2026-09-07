@@ -95,7 +95,7 @@ published.
 | Offset start | `auto.offset.reset=earliest` | `InitialPosition.Earliest` | Yes. |
 | Prefetch | `queued.min.messages` | `receiver_queue_size` | Approximately; both pinned to `max_poll_records`. |
 | Poll batch | `consume(max_poll_records, poll_timeout)` | `ConsumerBatchReceivePolicy(max_num_message, timeout_ms)` | Yes — pinned to the same two config values. Both default badly (100 ms) and both are overridden. |
-| Acknowledgement | `enable.auto.commit=false`, never commits | `acknowledge_cumulative` once per batch | **No.** Pulsar requires acknowledgement or messages redeliver at ack timeout; Kafka can simply never commit. **Favours Kafka** by one client call per batch. |
+| Acknowledgement | `enable.auto.commit=false`, never commits | `acknowledge_cumulative` per partition in batch | **No.** Pulsar requires acknowledgement or messages redeliver at ack timeout; Kafka can simply never commit. Pulsar tracks and cumulatively acknowledges the highest sequence per partition in each poll batch. **Favours Kafka** by client calls per batch. |
 | Retention | `log.retention.ms` | `defaultRetentionTimeInMinutes` | Yes, both 60 min. |
 | Auto topic creation | disabled | disabled | Yes — silent creation of a 1-partition topic would invalidate partition sweeps. |
 
