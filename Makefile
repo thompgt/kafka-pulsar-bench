@@ -87,3 +87,16 @@ test: ## Run unit tests with coverage in parallel
 .PHONY: lint
 lint: ## Run ruff and mypy on the harness
 	cd harness && ruff check && mypy src
+
+.PHONY: monitoring
+monitoring: ## Bring up Prometheus and Grafana
+	docker compose $(ENV_FILES) -f $(COMPOSE_DIR)/docker-compose.monitoring.yml up -d
+
+.PHONY: monitoring-down
+monitoring-down: ## Tear down Prometheus and Grafana
+	docker compose $(ENV_FILES) -f $(COMPOSE_DIR)/docker-compose.monitoring.yml down
+
+.PHONY: dashboard
+dashboard: ## Launch the local web monitoring dashboard
+	cd harness && python -m kpbench.cli dashboard
+

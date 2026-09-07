@@ -110,6 +110,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     results_dir = pathlib.Path(args.results_dir)
     env = fingerprint.collect() if not args.no_fingerprint else {}
 
+    exporter = None
+    if getattr(args, "export_metrics", False):
+        from kpbench.metrics.exporter import MetricsExporterServer
+
+        exporter = MetricsExporterServer(port=args.metrics_port)
+        exporter.start()
+        print(f"  prometheus exporter listening at http://localhost:{args.metrics_port}/metrics")
+
     # Discard runs come first. A broker's warm-up spans runs, not just the
     # warm-up window inside one (ADR-0004), so measuring immediately after a
     # broker reset samples the cold end of that curve.
@@ -117,41 +125,48 @@ def _cmd_run(args: argparse.Namespace) -> int:
     total_runs = warmup_runs + args.repeat
 
     failures = 0
-    for i in range(total_runs):
-        is_warmup = i < warmup_runs
-        if total_runs > 1:
-            label = (
-                f"warm-up {i + 1}/{warmup_runs}"
-                if is_warmup
-                else f"repeat {i - warmup_runs + 1}/{args.repeat}"
-            )
-            print(f"\n=== {label} ===")
+    try:
+        for i in range(total_runs):
+            is_warmup = i < warmup_runs
+            if total_runs > 1:
+                label = (
+                    f"warm-up {i + 1}/{warmup_runs}"
+                    if is_warmup
+                    else f"repeat {i - warmup_runs + 1}/{args.repeat}"
+                )
+                print(f"\n=== {label} ===")
 
-        # A fresh topic name per run. Reusing one would let a slow drain from
-        # the previous run leak into the next one's measurements.
-        run_config = config
-        if total_runs > 1:
-            topic = config.topic.model_copy(update={"name": f"{config.topic.name}-{i}"})
-            run_config = config.model_copy(update={"topic": topic})
+            # A fresh topic name per run. Reusing one would let a slow drain from
+            # the previous run leak into the next one's measurements.
+            run_config = config
+            if total_runs > 1:
+                topic = config.topic.model_copy(update={"name": f"{config.topic.name}-{i}"})
+                run_config = config.model_copy(update={"topic": topic})
 
-        driver = build_driver(run_config)
-        runner = BenchmarkRunner(run_config, driver)
-        try:
-            outcome = runner.run()
-        finally:
-            runner.cleanup()
+            driver = build_driver(run_config)
+            runner = BenchmarkRunner(run_config, driver)
+            try:
+                outcome = runner.run()
+            finally:
+                runner.cleanup()
 
-        _print_summary(outcome, run_config)
-        doc = manifest_mod.build(outcome, run_config, env, driver.client_info())
-        # Retained rather than deleted: they are evidence the procedure was
-        # followed, and a discard run that beats the measured run that follows
-        # it is a signal something is wrong.
-        doc["warmup_run"] = is_warmup
-        path = manifest_mod.write(doc, results_dir)
-        print(f"  manifest   {path}{' (warm-up, excluded)' if is_warmup else ''}")
+            _print_summary(outcome, run_config)
+            if exporter is not None:
+                exporter.update_metrics(outcome.metrics, config.driver)
 
-        if not outcome.valid and not is_warmup:
-            failures += 1
+            doc = manifest_mod.build(outcome, run_config, env, driver.client_info())
+            # Retained rather than deleted: they are evidence the procedure was
+            # followed, and a discard run that beats the measured run that follows
+            # it is a signal something is wrong.
+            doc["warmup_run"] = is_warmup
+            path = manifest_mod.write(doc, results_dir)
+            print(f"  manifest   {path}{' (warm-up, excluded)' if is_warmup else ''}")
+
+            if not outcome.valid and not is_warmup:
+                failures += 1
+    finally:
+        if exporter is not None:
+            exporter.stop()
 
     if failures:
         print(f"\n{failures}/{args.repeat} run(s) invalid", file=sys.stderr)
@@ -172,6 +187,13 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print(f"rate     {m['achieved_rate_hz']:,.0f}/s ({m['achieved_rate_ratio']:.1%})")
     p = m["latency"]["response"]["percentiles_us"]
     print(f"response p50={_fmt_us(p['p50'])} p99={_fmt_us(p['p99'])} p99.9={_fmt_us(p['p99.9'])}")
+    return 0
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    from kpbench.dashboard.server import run_server
+
+    run_server(host=args.host, port=args.port, results_dir=args.results_dir)
     return 0
 
 
@@ -200,11 +222,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip environment capture (faster; makes the run unpublishable)",
     )
+    run.add_argument(
+        "--export-metrics",
+        action="store_true",
+        help="expose Prometheus metrics endpoint on port 9102 during run",
+    )
+    run.add_argument(
+        "--metrics-port",
+        type=int,
+        default=9102,
+        help="port for Prometheus exporter (default: 9102)",
+    )
     run.set_defaults(func=_cmd_run)
 
     show = sub.add_parser("show", help="summarise a manifest")
     show.add_argument("manifest")
     show.set_defaults(func=_cmd_show)
+
+    dash = sub.add_parser("dashboard", help="launch web monitoring dashboard")
+    dash.add_argument("--host", default="0.0.0.0", help="host to bind to (default: 0.0.0.0)")
+    dash.add_argument("--port", type=int, default=8050, help="port to listen on (default: 8050)")
+    dash.add_argument(
+        "--results-dir", default="results", help="directory containing manifests (default: results)"
+    )
+    dash.set_defaults(func=_cmd_dashboard)
 
     return parser
 

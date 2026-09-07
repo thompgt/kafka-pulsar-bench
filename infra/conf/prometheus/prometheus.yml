@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "kpbench"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["host.docker.internal:9102"]
+
+  - job_name: "pulsar"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["pulsar:8080"]
+
+  - job_name: "minio"
+    metrics_path: "/minio/v2/metrics/cluster"
+    static_configs:
+      - targets: ["minio:9000"]

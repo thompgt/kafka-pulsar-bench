@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>kpbench // Benchmark Monitoring Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <div class="app-layout">
+    <!-- Navigation / Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-beacon"></div>
+        <div class="brand-text">
+          <span class="brand-title">kpbench</span>
+          <span class="brand-subtitle">Stream & Lakehouse Telemetry</span>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="control-group">
+          <label for="run-select" class="control-label">Active Run</label>
+          <select id="run-select" class="select-input" aria-label="Select Benchmark Run">
+            <option value="">Scanning manifests...</option>
+          </select>
+        </div>
+
+        <button id="btn-compare-toggle" class="btn btn-outline" aria-label="Toggle Comparison Mode">
+          <span class="icon">⮀</span> Compare Runs
+        </button>
+
+        <button id="btn-refresh" class="btn btn-primary" aria-label="Refresh Dashboard">
+          <span class="icon">⟳</span> Refresh
+        </button>
+      </div>
+    </header>
+
+    <!-- Comparison Toolbar (Visible in compare mode) -->
+    <section id="compare-bar" class="compare-bar hidden" aria-label="Comparison Controls">
+      <div class="compare-pane">
+        <div class="compare-col">
+          <span class="badge badge-kafka">Run A (Baseline)</span>
+          <select id="compare-select-a" class="select-input select-sm"></select>
+        </div>
+        <div class="compare-vs">VS</div>
+        <div class="compare-col">
+          <span class="badge badge-pulsar">Run B (Candidate)</span>
+          <select id="compare-select-b" class="select-input select-sm"></select>
+        </div>
+        <div class="compare-deltas" id="compare-summary-deltas">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Run Header Banner -->
+    <section class="run-banner card" id="run-banner">
+      <div class="banner-main">
+        <div class="run-tags">
+          <span id="badge-driver" class="badge badge-neutral">--</span>
+          <span id="badge-validity" class="badge badge-neutral">UNKNOWN</span>
+          <span id="badge-warmup" class="badge badge-warning hidden">WARM-UP (DISCARDED)</span>
+          <span id="run-id-display" class="mono text-muted">Select a run</span>
+        </div>
+        <h1 id="run-title" class="run-title">No benchmark run selected</h1>
+        <p id="run-description" class="run-description text-muted">Run manifests will appear here as sweeps and benchmarks complete.</p>
+      </div>
+      <div class="banner-meta" id="banner-meta">
+        <div class="meta-item">
+          <span class="meta-label">Workload</span>
+          <span id="meta-workload" class="meta-val mono">--</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Partitions</span>
+          <span id="meta-partitions" class="meta-val mono">--</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Timestamp</span>
+          <span id="meta-timestamp" class="meta-val mono">--</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- KPI Grid -->
+    <section class="kpi-grid" aria-label="Key Performance Indicators">
+      <div class="kpi-card card">
+        <div class="kpi-header">
+          <span class="kpi-title">Throughput Rate</span>
+          <span class="kpi-icon text-accent">⚡</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-row">
+            <span id="kpi-achieved-rate" class="kpi-value mono">--</span>
+            <span class="kpi-unit">msg/s</span>
+          </div>
+          <div class="progress-track">
+            <div id="kpi-rate-progress" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <div class="kpi-subtext">
+            <span>Target: <strong id="kpi-target-rate">--</strong> msg/s</span>
+            <span id="kpi-rate-ratio" class="kpi-delta mono">0.0%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-card card">
+        <div class="kpi-header">
+          <span class="kpi-title">Response Latency (p50)</span>
+          <span class="kpi-icon text-cyan">⏱</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-row">
+            <span id="kpi-p50" class="kpi-value mono">--</span>
+            <span class="kpi-unit" id="kpi-p50-unit">ms</span>
+          </div>
+          <div class="kpi-subtext">
+            <span>Median open-loop response</span>
+            <span id="kpi-service-p50" class="text-muted mono">svc: --</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-card card">
+        <div class="kpi-header">
+          <span class="kpi-title">Response Latency (p99)</span>
+          <span class="kpi-icon text-violet">🎯</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-row">
+            <span id="kpi-p99" class="kpi-value mono">--</span>
+            <span class="kpi-unit" id="kpi-p99-unit">ms</span>
+          </div>
+          <div class="kpi-subtext">
+            <span>99th percentile tail</span>
+            <span id="kpi-p999" class="text-muted mono">p99.9: --</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-card card">
+        <div class="kpi-header">
+          <span class="kpi-title">Generator Lag</span>
+          <span class="kpi-icon text-warning">⏳</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-row">
+            <span id="kpi-lag" class="kpi-value mono">--</span>
+            <span class="kpi-unit" id="kpi-lag-unit">us</span>
+          </div>
+          <div class="kpi-subtext">
+            <span>Harness lateness (ideal ~0)</span>
+            <span id="kpi-lag-status" class="badge badge-neutral">Clean</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-card card">
+        <div class="kpi-header">
+          <span class="kpi-title">Delivery Integrity</span>
+          <span class="kpi-icon text-success">🛡</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-row">
+            <span id="kpi-delivery-pct" class="kpi-value mono">--%</span>
+          </div>
+          <div class="kpi-subtext">
+            <span>Missing: <strong id="kpi-missing">0</strong></span>
+            <span>Dupes: <strong id="kpi-duplicates">0</strong></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Visualizer Section -->
+    <main class="dashboard-main">
+      <div class="tab-container card">
+        <nav class="tab-nav" aria-label="Dashboard views">
+          <button class="tab-btn active" data-tab="tab-latency" id="tab-btn-latency">Latency Distributions</button>
+          <button class="tab-btn" data-tab="tab-throughput" id="tab-btn-throughput">Throughput Timeline</button>
+          <button class="tab-btn" data-tab="tab-env" id="tab-btn-env">Environment Fingerprint</button>
+          <button class="tab-btn" data-tab="tab-runs" id="tab-btn-runs">All Stored Runs</button>
+        </nav>
+
+        <!-- Tab 1: Latency Distributions -->
+        <div id="tab-latency" class="tab-content active">
+          <div class="chart-header">
+            <div>
+              <h2 class="chart-title">Percentile Distribution Profile</h2>
+              <p class="chart-subtitle text-muted">HdrHistogram percentiles compared across Response, Service, and Generator Lag series.</p>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-dot dot-response"></span> Response (Intended to Recv)</span>
+              <span class="legend-item"><span class="legend-dot dot-service"></span> Service (Actual Send to Recv)</span>
+              <span class="legend-item"><span class="legend-dot dot-lag"></span> Generator Lag</span>
+            </div>
+          </div>
+
+          <div class="chart-canvas-wrapper">
+            <div id="latency-bars-container" class="percentile-bars-grid">
+              <!-- Rendered dynamically by app.js -->
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="data-table" id="percentiles-table">
+              <thead>
+                <tr>
+                  <th>Percentile</th>
+                  <th>Response Latency</th>
+                  <th>Service Latency</th>
+                  <th>Generator Lag</th>
+                </tr>
+              </thead>
+              <tbody id="percentiles-tbody">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 2: Throughput Timeline -->
+        <div id="tab-throughput" class="tab-content">
+          <div class="chart-header">
+            <div>
+              <h2 class="chart-title">Throughput Series (Messages/Second)</h2>
+              <p class="chart-subtitle text-muted">Per-second arrival rate recorded by consumer sample buffer.</p>
+            </div>
+          </div>
+          <div class="chart-canvas-wrapper">
+            <div id="throughput-chart" class="throughput-bars-chart">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Environment Fingerprint -->
+        <div id="tab-env" class="tab-content">
+          <div class="env-grid">
+            <div class="env-card">
+              <h3>Host Machine</h3>
+              <dl id="env-host-list" class="env-dl"></dl>
+            </div>
+            <div class="env-card">
+              <h3>Docker & Containers</h3>
+              <dl id="env-docker-list" class="env-dl"></dl>
+            </div>
+            <div class="env-card">
+              <h3>Client & Driver</h3>
+              <dl id="env-client-list" class="env-dl"></dl>
+            </div>
+            <div class="env-card">
+              <h3>Git Provenance</h3>
+              <dl id="env-git-list" class="env-dl"></dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: All Stored Runs -->
+        <div id="tab-runs" class="tab-content">
+          <div class="runs-toolbar">
+            <input type="text" id="runs-filter" class="text-input" placeholder="Search runs by ID, driver...">
+            <div class="runs-filter-pills">
+              <button class="pill-btn active" data-filter="all">All</button>
+              <button class="pill-btn" data-filter="kafka">Kafka</button>
+              <button class="pill-btn" data-filter="pulsar">Pulsar</button>
+              <button class="pill-btn" data-filter="loopback">Loopback</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="all-runs-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Driver</th>
+                  <th>Validity</th>
+                  <th>Workload</th>
+                  <th>Achieved Rate</th>
+                  <th>p50</th>
+                  <th>p99</th>
+                  <th>Timestamp</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="all-runs-tbody">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer text-muted">
+      <span>kafka-pulsar-bench // independent & reproducible stream lakehouse benchmarking</span>
+      <span class="footer-links">
+        <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana (:3000)</a>
+        <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus (:9090)</a>
+      </span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+# Monitoring profile: Prometheus & Grafana
+#
+# Provides time-series scraping of Pulsar (:8080/metrics), MinIO (:9000),
+# and live benchmark harness telemetry (:9102), with pre-provisioned
+# Kafka vs. Pulsar dashboards in Grafana (:3000).
+
+name: kpbench
+
+networks:
+  kpbench:
+    name: kpbench
+
+volumes:
+  prometheus_data:
+    name: kpbench_prometheus_data
+  grafana_data:
+    name: kpbench_grafana_data
+
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE}:${PROMETHEUS_VERSION}
+    container_name: kpbench-prometheus
+    hostname: prometheus
+    networks: [kpbench]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../conf/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    cpus: 0.5
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  grafana:
+    image: ${GRAFANA_IMAGE}:${GRAFANA_VERSION}
+    container_name: kpbench-grafana
+    hostname: grafana
+    networks: [kpbench]
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ../conf/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../conf/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    cpus: 0.5
+    mem_limit: 256m
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
