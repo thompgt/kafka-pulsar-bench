@@ -79,3 +79,11 @@ digests: ## Re-resolve image digests into images.lock
 .PHONY: digests-check
 digests-check: ## Fail if images.lock is stale
 	@bash scripts/resolve-digests.sh --check
+
+.PHONY: test
+test: ## Run unit tests with coverage in parallel
+	cd harness && pytest
+
+.PHONY: lint
+lint: ## Run ruff and mypy on the harness
+	cd harness && ruff check && mypy src

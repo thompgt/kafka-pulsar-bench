@@ -28,6 +28,8 @@ pulsar = [
 ]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML",
@@ -58,3 +60,13 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto --cov=kpbench --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+source = ["src/kpbench"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+omit = ["src/kpbench/cli.py"]
