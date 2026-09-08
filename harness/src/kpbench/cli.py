@@ -162,6 +162,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
             path = manifest_mod.write(doc, results_dir)
             print(f"  manifest   {path}{' (warm-up, excluded)' if is_warmup else ''}")
 
+            if getattr(args, "auto_load", False):
+                try:
+                    from kpbench.results.warehouse import IcebergWarehouse
+
+                    warehouse = IcebergWarehouse()
+                    warehouse.load_run(doc)
+                    print("  iceberg    loaded into bench.runs")
+                except Exception as e:
+                    print(f"  iceberg    load failed: {e}", file=sys.stderr)
+
             if not outcome.valid and not is_warmup:
                 failures += 1
     finally:
@@ -194,6 +204,25 @@ def _cmd_dashboard(args: argparse.Namespace) -> int:
     from kpbench.dashboard.server import run_server
 
     run_server(host=args.host, port=args.port, results_dir=args.results_dir)
+    return 0
+
+
+def _cmd_load(args: argparse.Namespace) -> int:
+    from kpbench.results.warehouse import IcebergWarehouse
+
+    warehouse = IcebergWarehouse(catalog_url=args.catalog_url)
+    target = pathlib.Path(args.target)
+    if target.is_dir() or args.all:
+        loaded = warehouse.load_directory(target)
+        print(f"Loaded {len(loaded)} run(s) into Iceberg warehouse:")
+        for r in loaded:
+            print(f"  + {r}")
+    else:
+        loaded_ok = warehouse.load_manifest_file(target, supersedes_run_id=args.supersedes)
+        if loaded_ok:
+            print(f"Loaded run from {target} into Iceberg warehouse")
+        else:
+            print(f"Run from {target} already exists in warehouse (skipped)")
     return 0
 
 
@@ -233,6 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=9102,
         help="port for Prometheus exporter (default: 9102)",
     )
+    run.add_argument(
+        "--auto-load",
+        action="store_true",
+        help="automatically ingest completed run into Iceberg warehouse",
+    )
     run.set_defaults(func=_cmd_run)
 
     show = sub.add_parser("show", help="summarise a manifest")
@@ -246,6 +280,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--results-dir", default="results", help="directory containing manifests (default: results)"
     )
     dash.set_defaults(func=_cmd_dashboard)
+
+    load = sub.add_parser("load", help="ingest run manifest(s) into Iceberg warehouse")
+    load.add_argument("target", help="path to a manifest.json or a directory of runs")
+    load.add_argument("--all", action="store_true", help="scan target directory for all manifests")
+    load.add_argument(
+        "--catalog-url",
+        default="http://localhost:8181",
+        help="Iceberg REST catalog URL (default: http://localhost:8181)",
+    )
+    load.add_argument(
+        "--supersedes",
+        help="mark this run as superseding a previous run_id (Invariant 5)",
+    )
+    load.set_defaults(func=_cmd_load)
 
     return parser
 

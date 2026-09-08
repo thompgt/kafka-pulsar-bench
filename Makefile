@@ -100,3 +100,7 @@ monitoring-down: ## Tear down Prometheus and Grafana
 dashboard: ## Launch the local web monitoring dashboard
 	cd harness && python -m kpbench.cli dashboard
 
+.PHONY: load
+load: ## Ingest a manifest into the Iceberg warehouse (e.g. make load RUN=results/...)
+	cd harness && python -m kpbench.cli load $(RUN)
+

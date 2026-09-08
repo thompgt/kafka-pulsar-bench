@@ -18,6 +18,8 @@ dependencies = [
     # Native client: releases the GIL during send, which is what makes a
     # Python harness viable at benchmark rates.
     "confluent-kafka>=2.5,<3",
+    # Results warehouse: Apache Iceberg writes to the REST catalog backed by S3.
+    "pyiceberg[pyarrow,s3fs]>=0.7.0,<1",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +35,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML",
+    "sqlalchemy>=2.0",
 ]
 
 [project.scripts]
@@ -55,7 +58,7 @@ files = ["src"]
 
 [[tool.mypy.overrides]]
 # Neither ships type stubs.
-module = ["hdrh.*", "confluent_kafka.*", "pulsar.*"]
+module = ["hdrh.*", "confluent_kafka.*", "pulsar.*", "pyiceberg.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

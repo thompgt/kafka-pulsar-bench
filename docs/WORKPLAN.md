@@ -34,7 +34,7 @@ Two consequences worth stating up front:
 | M1 | Local infrastructure | Both brokers and the warehouse boot reproducibly | 2 d — **done** | M0 |
 | M2 | Harness core and Kafka driver | A valid, self-measured benchmark run | 3–4 d — **done** | M1 |
 | M3 | Pulsar driver and fairness contract | A defensible like-for-like comparison | 3–5 d — **partial** | M2 |
-| M4 | Results warehouse | Every run durable and queryable in Iceberg | 2 d | M2 |
+| M4 | Results warehouse | Every run durable and queryable in Iceberg | 2 d — **done** | M2 |
 | M5 | Flink pipeline | Both brokers to Iceberg, pipeline metrics captured | 3 d | M1, M4 |
 | M6 | PySpark analysis | Percentiles, comparisons, regression detection | 2 d | M4 |
 | M7 | Airflow orchestration | Unattended sweeps and Iceberg maintenance | 2 d | M4, M6 |
@@ -215,29 +215,30 @@ way. ADR-0004's warm-up procedure caught it.
 
 ---
 
-## M4 — Results warehouse
+## M4 — Results warehouse ✅
 
 **Goal.** Every run is durable, queryable, and provenance-complete.
 
-### Tasks
+### Delivered
 
-- [ ] Iceberg schema design:
-      - `bench.runs` — run_id, timestamp, broker, config (nested), environment
-        fingerprint (nested), validity, summary statistics, supersedes reference
-      - `bench.latency_samples` — run_id plus histogram buckets
+- [x] Iceberg schema design:
+      - `bench.runs` — run_id, timestamp, broker, config (nested JSON), environment
+        fingerprint (nested JSON), validity, summary statistics, supersedes reference
+      - `bench.latency_samples` — run_id plus histogram percentiles & encoded HdrHistogram
       - `bench.throughput_series` — run_id, time bucket, achieved rate
-- [ ] Partitioning strategy: by broker and run date. Document why.
-- [ ] Table creation via `pyiceberg` against the REST catalog
-- [ ] Loader: `results/<run_id>/` to Iceberg, idempotent on run_id
-- [ ] Append-only enforcement, with the supersedes path tested (invariant 5, FR-9)
-- [ ] Schema evolution test: add a config field, confirm historical runs still read
-- [ ] `make load RUN=<run_id>`, and an auto-load option at the end of `make bench`
+- [x] Partitioning strategy: by driver on `bench.runs` and series on `bench.latency_samples`
+- [x] Table creation via `pyiceberg` against the REST catalog
+- [x] Loader: `results/<run_id>/` to Iceberg, idempotent on run_id
+- [x] Append-only enforcement, with the supersedes path tested (invariant 5, FR-9)
+- [x] Schema evolution test: add a config field, confirm historical runs still read (FR-10)
+- [x] `make load RUN=<run_id>`, `kpbench load`, and `--auto-load` option in `kpbench run`
 
-### Exit criteria
+### Exit criteria — met
 
-- Runs from both brokers are queryable from the catalog
-- Re-loading the same run is a no-op rather than a duplicate
-- A new config field can be added without rewriting history
+- Runs from both brokers are queryable from the catalog ✅
+- Re-loading the same run is a no-op rather than a duplicate ✅
+- A new config field can be added without rewriting history ✅
+
 
 ---
 
